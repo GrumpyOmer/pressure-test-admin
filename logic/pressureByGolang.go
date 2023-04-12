@@ -1,6 +1,7 @@
 package logic
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -12,7 +13,9 @@ import (
 	"pressure-test-admin/schema"
 	"pressure-test-admin/tool/go-stress-testing/model"
 	"pressure-test-admin/tool/go-stress-testing/server"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -74,6 +77,8 @@ func PressureByGolang(c *gin.Context) {
 				// 将golang代码文件起成一个服务以提供调用
 				// 启动golang服务进程
 				cmd := exec.Command("go", "run", "./tmp/"+strconv.Itoa(dir)+"/main.go")
+				// 子进程输出打印在主线程控制台
+				cmd.Stdout = os.Stdout
 				if err := cmd.Start(); err != nil {
 					rsp.Code = 400
 					rsp.Message = "Error RunGoService invalid: " + err.Error()
@@ -90,6 +95,8 @@ func PressureByGolang(c *gin.Context) {
 					// 开始处理
 					server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con)
 					os.RemoveAll("./tmp/" + strconv.Itoa(dir) + "/")
+					// 杀死当前启动的服务的进程
+					exec.Command("taskkill", "/pid", strconv.Itoa(portInUse(currentParam.Port)), "-t", "-f").Run()
 					continue
 				}
 			}
@@ -156,4 +163,24 @@ func ScanPort(protocol string, hostname string, port int) bool {
 	}
 	defer conn.Close()
 	return true
+}
+
+func portInUse(portNumber int) int {
+	res := -1
+	var outBytes bytes.Buffer
+	cmdStr := fmt.Sprintf("netstat -ano -p tcp | findstr %d", portNumber)
+	cmd := exec.Command("cmd", "/c", cmdStr)
+	cmd.Stdout = &outBytes
+	cmd.Run()
+	resStr := outBytes.String()
+	r := regexp.MustCompile(`\s\d+\s`).FindAllString(resStr, -1)
+	if len(r) > 0 {
+		pid, err := strconv.Atoi(strings.TrimSpace(r[0]))
+		if err != nil {
+			res = -1
+		} else {
+			res = pid
+		}
+	}
+	return res
 }

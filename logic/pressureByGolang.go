@@ -63,6 +63,11 @@ func PressureByGolang(c *gin.Context) {
 				rsp.Code = 400
 				rsp.Message = "Error ConcurrencyQuantity or port invalid"
 			} else {
+				if ok := ScanPort("tcp", "127.0.0.1", currentParam.Port); ok {
+					rsp.Code = 400
+					rsp.Message = "当前端口已被使用，请更换"
+					goto END
+				}
 				// logic
 				if dir == 0 {
 					// 生成子目录
@@ -79,7 +84,8 @@ func PressureByGolang(c *gin.Context) {
 				cmd := exec.Command("go", "run", "./tmp/"+strconv.Itoa(dir)+"/main.go")
 				// 子进程输出打印在主线程控制台
 				cmd.Stdout = os.Stdout
-				if err := cmd.Start(); err != nil {
+				err = cmd.Start()
+				if err != nil {
 					rsp.Code = 400
 					rsp.Message = "Error RunGoService invalid: " + err.Error()
 					goto END

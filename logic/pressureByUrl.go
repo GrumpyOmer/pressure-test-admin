@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"net/http"
 	"pressure-test-admin/schema"
 	"pressure-test-admin/tool/go-stress-testing/model"
 	"pressure-test-admin/tool/go-stress-testing/server"
@@ -29,7 +30,12 @@ var (
 	cpuNumber          = 1       // CUP 核数，默认为一核，一般场景下单核已经够用了
 	timeout     int64  = 0       // 超时时间，默认不设置
 )
-var upgrader = websocket.Upgrader{}
+var upgrader = websocket.Upgrader{
+	// 支持跨域
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
 func PressureByUrl(c *gin.Context) {
 	con, err := upgrader.Upgrade(c.Writer, c.Request, nil)

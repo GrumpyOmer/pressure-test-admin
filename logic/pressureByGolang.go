@@ -81,7 +81,8 @@ func PressureByGolang(c *gin.Context) {
 				}
 				// 将golang代码文件起成一个服务以提供调用
 				// 启动golang服务进程
-				cmd := exec.Command("go", "run", "./tmp/"+strconv.Itoa(dir)+"/main.go")
+				exec.Command("go", "build", "-o", "./tmp/"+strconv.Itoa(dir)+"/main.exe", "./tmp/"+strconv.Itoa(dir)+"/").Run()
+				cmd := exec.Command("./tmp/" + strconv.Itoa(dir) + "/main.exe")
 				// 子进程输出打印在主线程控制台
 				cmd.Stdout = os.Stdout
 				err = cmd.Start()
@@ -100,9 +101,10 @@ func PressureByGolang(c *gin.Context) {
 					request.Print()
 					// 开始处理
 					server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con)
-					os.RemoveAll("./tmp/" + strconv.Itoa(dir) + "/")
+					fmt.Println(cmd.Process.Kill())
+					time.Sleep(1 * time.Second)
+					fmt.Println(os.RemoveAll("./tmp/" + strconv.Itoa(dir) + "/"))
 					// 杀死当前启动的服务的进程
-					exec.Command("taskkill", "/pid", strconv.Itoa(portInUse(currentParam.Port)), "-t", "-f").Run()
 					continue
 				}
 			}

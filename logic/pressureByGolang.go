@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,6 +27,7 @@ func PressureByGolang(c *gin.Context) {
 		return
 	}
 	defer con.Close()
+	go pingHandle(con)
 	currentParam := schema.PressureByGolangReq{}
 	dir := 0
 	for {
@@ -35,19 +37,23 @@ func PressureByGolang(c *gin.Context) {
 			fmt.Println("Error road message:" + err.Error())
 			break
 		}
+		if string(message) == "ping" {
+			con.WriteMessage(mt, []byte("pong"))
+			continue
+		}
 		rsp := schema.PublicRsp{}
 		res := []byte{}
 		fmt.Println(string(message))
 
-		if currentParam.ConcurrencyQuantity == 0 || currentParam.Port == 0 {
+		if currentParam.ConcurrencyQuantity == 0 || currentParam.Port == 0 || currentParam.PressureTime == 0 {
 			// 必须先设置并发数和端口
 			if err = json.Unmarshal(message, &currentParam); err != nil {
 				fmt.Println("Error unmarshal message:" + err.Error())
 				rsp.Code = 400
-				rsp.Message = "请先设置并发数或进程使用端口，或设置失败检查参数"
+				rsp.Message = "请先设置并发数或进程使用端口或压测时间，或设置失败检查参数"
 			} else {
 				rsp.Code = 200
-				rsp.Message = "设置并发数/端口成功"
+				rsp.Message = "设置并发数/端口/压测时间成功"
 			}
 			goto END
 		}
@@ -55,13 +61,13 @@ func PressureByGolang(c *gin.Context) {
 		//识别修改并发数
 		if err = json.Unmarshal(message, &currentParam); err == nil {
 			rsp.Code = 200
-			rsp.Message = "修改并发数/端口成功"
+			rsp.Message = "修改并发数/端口/压测时间成功"
 			goto END
 		} else {
-			if currentParam.ConcurrencyQuantity == 0 || currentParam.Port == 0 {
-				fmt.Println("Error ConcurrencyQuantity or port invalid")
+			if currentParam.ConcurrencyQuantity == 0 || currentParam.Port == 0 || currentParam.PressureTime == 0 {
+				fmt.Println("Error ConcurrencyQuantity or port or PressureTime invalid")
 				rsp.Code = 400
-				rsp.Message = "Error ConcurrencyQuantity or port invalid"
+				rsp.Message = "Error ConcurrencyQuantity or port or PressureTime invalid"
 			} else {
 				if ok := ScanPort("tcp", "127.0.0.1", currentParam.Port); ok {
 					rsp.Code = 400
@@ -99,13 +105,27 @@ func PressureByGolang(c *gin.Context) {
 				} else {
 					fmt.Printf("\n 开始启动  并发数:%d 请求数:%d 请求参数: \n", currentParam.ConcurrencyQuantity, totalNumber)
 					request.Print()
-					// 开始处理
-					server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con)
+					ticker1 := time.NewTicker(time.Second)
+					w := sync.WaitGroup{}
+					w.Add(int(currentParam.PressureTime))
+					defer ticker1.Stop()
+					startTime := time.Now().UnixNano()
+					for {
+						// 每1秒中从chan t.C 中读取一次
+						<-ticker1.C
+						if currentParam.PressureTime == 0 {
+							break
+						}
+						// 开始处理
+						go server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con, &w, startTime)
+						currentParam.PressureTime--
+					}
+					w.Wait()
+					// 杀死当前启动的服务的进程
 					fmt.Println(cmd.Process.Kill())
 					time.Sleep(1 * time.Second)
 					fmt.Println(os.RemoveAll("./tmp/" + strconv.Itoa(dir) + "/"))
-					// 杀死当前启动的服务的进程
-					continue
+					rsp.Code = 0
 				}
 			}
 		}
@@ -124,6 +144,7 @@ func PressureByGolang(c *gin.Context) {
 // 解析并检测golang代码
 func ParseGolangCode(code string, dir string) error {
 	var newTmpDir = "./tmp/" + dir + "/"
+	code = strings.ReplaceAll(code, "\u00a0", " ")
 	var codeBytes = []byte(code)
 	// 格式化输出的代码
 	if formatCode, err := format.Source(codeBytes); nil == err {
@@ -154,7 +175,7 @@ func ParseGolangCode(code string, dir string) error {
 		fmt.Println(err)
 		fmt.Println(string(res))
 		// 删除文件夹以及main文件
-		os.RemoveAll(newTmpDir)
+		//os.RemoveAll(newTmpDir)
 		return err
 	}
 	return nil

@@ -21,15 +21,17 @@ import (
 
 var (
 	// 输出统计数据的时间
-	exportStatisticsTime = 1 * time.Second
+	exportStatisticsTime = 5 * time.Second
 	p                    = message.NewPrinter(language.English)
 	requestTimeList      []uint64 // 所有请求响应时间
+	// websocket 并发安全锁
+	wSync = sync.Mutex{}
 )
 
 // ReceivingResults 接收结果并处理
 // 统计的时间都是纳秒，显示的时间 都是毫秒
 // concurrent 并发数
-func ReceivingResults(concurrent uint64, ch <-chan *model.RequestResults, wg *sync.WaitGroup, con *websocket.Conn) {
+func ReceivingResults(concurrent uint64, ch <-chan *model.RequestResults, wg *sync.WaitGroup, con *websocket.Conn, sTime int64) {
 	defer func() {
 		wg.Done()
 	}()
@@ -59,7 +61,7 @@ func ReceivingResults(concurrent uint64, ch <-chan *model.RequestResults, wg *sy
 				endTime := uint64(time.Now().UnixNano())
 				mutex.Lock()
 				go calculateData(concurrent, processingTime, endTime-statTime, maxTime, minTime, successNum, failureNum,
-					chanIDLen, errCode, receivedBytes, con)
+					chanIDLen, errCode, receivedBytes, con, sTime)
 				mutex.Unlock()
 			case <-stopChan:
 				// 处理完成
@@ -106,7 +108,7 @@ func ReceivingResults(concurrent uint64, ch <-chan *model.RequestResults, wg *sy
 	endTime := uint64(time.Now().UnixNano())
 	requestTime = endTime - statTime
 	calculateData(concurrent, processingTime, requestTime, maxTime, minTime, successNum, failureNum, chanIDLen, errCode,
-		receivedBytes, con)
+		receivedBytes, con, sTime)
 
 	fmt.Printf("\n\n")
 	fmt.Println("*************************  结果 stat  ****************************")
@@ -135,7 +137,7 @@ func printTop(requestTimeList []uint64) {
 
 // calculateData 计算数据
 func calculateData(concurrent, processingTime, requestTime, maxTime, minTime, successNum, failureNum uint64,
-	chanIDLen int, errCode *sync.Map, receivedBytes int64, con *websocket.Conn) {
+	chanIDLen int, errCode *sync.Map, receivedBytes int64, con *websocket.Conn, sTime int64) {
 	if processingTime == 0 {
 		processingTime = 1
 	}
@@ -160,7 +162,7 @@ func calculateData(concurrent, processingTime, requestTime, maxTime, minTime, su
 	requestTimeFloat = float64(requestTime) / 1e9
 	// 打印的时长都为毫秒
 	table(successNum, failureNum, errCode, qps, averageTime, maxTimeFloat, minTimeFloat, requestTimeFloat, chanIDLen,
-		receivedBytes, con)
+		receivedBytes, con, sTime)
 
 }
 
@@ -176,7 +178,7 @@ func header() {
 
 // table 打印表格
 func table(successNum, failureNum uint64, errCode *sync.Map,
-	qps, averageTime, maxTimeFloat, minTimeFloat, requestTimeFloat float64, chanIDLen int, receivedBytes int64, con *websocket.Conn) {
+	qps, averageTime, maxTimeFloat, minTimeFloat, requestTimeFloat float64, chanIDLen int, receivedBytes int64, con *websocket.Conn, sTime int64) {
 	var (
 		speed int64
 	)
@@ -215,6 +217,7 @@ func table(successNum, failureNum uint64, errCode *sync.Map,
 			MinTime        string `json:"min_time"`
 			AvgTime        string `json:"avg_time"`
 			CodeInfo       string `json:"code_info"`
+			RequestTime    string `json:"request_time"`
 		}{
 			ConcurrencyNum: int64(chanIDLen),
 			Success:        int64(successNum),
@@ -224,8 +227,11 @@ func table(successNum, failureNum uint64, errCode *sync.Map,
 			MinTime:        strings.TrimSpace(fmt.Sprintf("%8.2f", minTimeFloat)),
 			AvgTime:        strings.TrimSpace(fmt.Sprintf("%8.2f", averageTime)),
 			CodeInfo:       strings.TrimSpace(printMap(errCode)),
+			RequestTime:    strings.TrimSpace(fmt.Sprintf("%4.0f", float64(time.Now().UnixNano()-sTime)/1e6)),
 		},
 	})
+	wSync.Lock()
+	defer wSync.Unlock()
 	if err := con.WriteMessage(1, res); err != nil {
 		fmt.Println("Error write message:" + err.Error())
 	}

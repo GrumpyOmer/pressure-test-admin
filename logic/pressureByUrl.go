@@ -9,6 +9,8 @@ import (
 	"pressure-test-admin/schema"
 	"pressure-test-admin/tool/go-stress-testing/model"
 	"pressure-test-admin/tool/go-stress-testing/server"
+	"sync"
+	"time"
 )
 
 // array 自定义数组参数
@@ -44,12 +46,17 @@ func PressureByUrl(c *gin.Context) {
 		return
 	}
 	defer con.Close()
+	go pingHandle(con)
 	for {
 		// road request message
 		mt, message, err := con.ReadMessage()
 		if err != nil {
 			fmt.Println("Error road message:" + err.Error())
 			break
+		}
+		if string(message) == "ping" {
+			con.WriteMessage(mt, []byte("pong"))
+			continue
 		}
 		currentParam := schema.PressureByUrlReq{}
 		rsp := schema.PublicRsp{}
@@ -59,7 +66,7 @@ func PressureByUrl(c *gin.Context) {
 			break
 		}
 		fmt.Println(currentParam)
-		if currentParam.Url == "" || currentParam.ConcurrencyQuantity == 0 {
+		if currentParam.Url == "" || currentParam.ConcurrencyQuantity == 0 || currentParam.PressureTime == 0 {
 			fmt.Println("Error invalid param")
 			rsp.Code = 400
 			rsp.Message = "Error invalid param"
@@ -73,9 +80,24 @@ func PressureByUrl(c *gin.Context) {
 			} else {
 				fmt.Printf("\n 开始启动  并发数:%d 请求数:%d 请求参数: \n", currentParam.ConcurrencyQuantity, totalNumber)
 				request.Print()
-				// 开始处理
-				server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con)
-				continue
+				ticker1 := time.NewTicker(time.Second)
+				w := sync.WaitGroup{}
+				w.Add(int(currentParam.PressureTime))
+				defer ticker1.Stop()
+				startTime := time.Now().UnixNano()
+
+				for {
+					// 每1秒中从chan t.C 中读取一次
+					<-ticker1.C
+					if currentParam.PressureTime == 0 {
+						break
+					}
+					// 开始处理
+					go server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con, &w, startTime)
+					currentParam.PressureTime--
+				}
+				w.Wait()
+				rsp.Code = 0
 			}
 		}
 		res, _ = json.Marshal(rsp)
@@ -86,4 +108,19 @@ func PressureByUrl(c *gin.Context) {
 		}
 	}
 
+}
+
+func pingHandle(c *websocket.Conn) {
+	ticker := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			err := c.WriteMessage(websocket.PingMessage, nil)
+			if err != nil {
+				fmt.Println(err.Error())
+				fmt.Println(c.Close())
+				return
+			}
+		}
+	}
 }

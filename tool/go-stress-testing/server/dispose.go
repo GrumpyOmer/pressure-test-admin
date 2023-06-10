@@ -30,7 +30,8 @@ func init() {
 }
 
 // Dispose 处理函数
-func Dispose(ctx context.Context, concurrency, totalNumber uint64, request *model.Request, con *websocket.Conn) {
+func Dispose(ctx context.Context, concurrency, totalNumber uint64, request *model.Request, con *websocket.Conn, w *sync.WaitGroup, sTime int64) {
+	defer w.Done()
 	// 设置接收数据缓存
 	ch := make(chan *model.RequestResults, 1000)
 	var (
@@ -38,7 +39,7 @@ func Dispose(ctx context.Context, concurrency, totalNumber uint64, request *mode
 		wgReceiving sync.WaitGroup // 数据处理完成
 	)
 	wgReceiving.Add(1)
-	go statistics.ReceivingResults(concurrency, ch, &wgReceiving, con)
+	go statistics.ReceivingResults(concurrency, ch, &wgReceiving, con, sTime)
 
 	for i := uint64(0); i < concurrency; i++ {
 		wg.Add(1)

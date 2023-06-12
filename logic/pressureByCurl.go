@@ -80,7 +80,7 @@ func PressureByCurl(c *gin.Context) {
 							break
 						}
 						// 开始处理
-						server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con, &w, startTime)
+						go server.Dispose(c, currentParam.ConcurrencyQuantity, totalNumber, request, con, &w, startTime)
 						currentParam.PressureTime--
 					}
 					w.Wait()
